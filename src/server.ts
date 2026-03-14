@@ -17,6 +17,265 @@ const DIST_DIR = import.meta.filename.endsWith(".ts")
   : import.meta.dirname;
 
 // ============================================================
+// MCP to Native Excalidraw Format Converter
+// ============================================================
+
+let seedCounter = 1000;
+let versionCounter = 1;
+
+function getNextSeed(): number {
+  return seedCounter++;
+}
+
+function getNextVersion(): number {
+  return versionCounter++;
+}
+
+function estimateTextWidth(text: string, fontSize: number): number {
+  return Math.ceil(text.length * fontSize * 0.55);
+}
+
+function estimateTextHeight(fontSize: number): number {
+  return Math.ceil(fontSize * 1.25);
+}
+
+/**
+ * Convert MCP simplified format to native Excalidraw format.
+ * - Transforms `label` property on shapes/arrows to bound text elements
+ * - Adds all required fields for text elements to render correctly
+ */
+function convertMcpToNative(data: { elements?: any[] }): any[] {
+  const elements = data.elements || [];
+  const newElements: any[] = [];
+
+  for (const el of elements) {
+    // Skip pseudo-elements
+    if (el.type === "cameraUpdate" || el.type === "restoreCheckpoint" || el.type === "delete") {
+      continue;
+    }
+
+    // Convert element to native format
+    const nativeEl = convertElementToNative(el);
+
+    // Handle label property - convert to bound text element
+    if (el.label && typeof el.label === "object") {
+      const labelTextId = `${el.id}_label`;
+      const labelText = el.label.text || "";
+      const fontSize = el.label.fontSize || 16;
+
+      if (el.type === "arrow") {
+        // Arrow label: position at midpoint
+        const midX = el.x + (el.width || 0) / 2;
+        const midY = el.y + (el.height || 0) / 2;
+        const labelElement = createStandaloneTextElement(
+          labelTextId,
+          labelText,
+          fontSize,
+          midX,
+          midY
+        );
+        nativeEl.boundElements = nativeEl.boundElements || [];
+        nativeEl.boundElements.push({ id: labelTextId, type: "text" });
+        newElements.push(nativeEl);
+        newElements.push(labelElement);
+      } else if (["rectangle", "ellipse", "diamond"].includes(el.type)) {
+        // Shape label: create bound text element centered in container
+        const labelElement = createBoundTextElement(
+          labelTextId,
+          labelText,
+          fontSize,
+          nativeEl.x,
+          nativeEl.y,
+          nativeEl.width,
+          nativeEl.height,
+          el.id
+        );
+        nativeEl.boundElements = nativeEl.boundElements || [];
+        nativeEl.boundElements.push({ id: labelTextId, type: "text" });
+        newElements.push(nativeEl);
+        newElements.push(labelElement);
+      } else {
+        newElements.push(nativeEl);
+      }
+    } else {
+      newElements.push(nativeEl);
+    }
+  }
+
+  return newElements;
+}
+
+function convertElementToNative(el: any): any {
+  const native = { ...el };
+  
+  // Remove label property (handled separately)
+  delete native.label;
+  
+  // Add required fields for all elements
+  native.version = native.version || getNextVersion();
+  native.versionNonce = native.versionNonce || getNextSeed();
+  native.isDeleted = native.isDeleted || false;
+  native.seed = native.seed || getNextSeed();
+  native.groupIds = native.groupIds || [];
+  native.frameId = native.frameId || null;
+  native.angle = native.angle || 0;
+  native.link = native.link || null;
+  native.locked = native.locked || false;
+  native.updated = native.updated || Date.now();
+  
+  if (el.type === "text") {
+    native.fillStyle = native.fillStyle || "solid";
+    native.strokeWidth = native.strokeWidth || 2;
+    native.strokeStyle = native.strokeStyle || "solid";
+    native.roughness = native.roughness || 1;
+    native.opacity = native.opacity || 100;
+    native.backgroundColor = native.backgroundColor || "transparent";
+    native.roundness = native.roundness || null;
+    native.boundElements = native.boundElements || null;
+    native.rawText = native.rawText || native.text;
+    native.originalText = native.originalText || native.text;
+    native.fontFamily = native.fontFamily || 1;
+    native.textAlign = native.textAlign || "left";
+    native.verticalAlign = native.verticalAlign || "top";
+    native.containerId = native.containerId || null;
+    native.autoResize = native.autoResize !== false;
+    native.lineHeight = native.lineHeight || 1.25;
+    native.width = native.width || estimateTextWidth(native.text || "", native.fontSize || 20);
+    native.height = native.height || estimateTextHeight(native.fontSize || 20);
+  } else if (["rectangle", "ellipse", "diamond"].includes(el.type)) {
+    native.fillStyle = native.fillStyle || "solid";
+    native.strokeWidth = native.strokeWidth || 2;
+    native.strokeStyle = native.strokeStyle || "solid";
+    native.roughness = native.roughness || 1;
+    native.opacity = native.opacity || 100;
+    native.boundElements = native.boundElements || null;
+  } else if (el.type === "arrow") {
+    native.fillStyle = native.fillStyle || "solid";
+    native.strokeWidth = native.strokeWidth || 2;
+    native.strokeStyle = native.strokeStyle || "solid";
+    native.roughness = native.roughness || 1;
+    native.opacity = native.opacity || 100;
+    native.boundElements = native.boundElements || null;
+    native.startBinding = native.startBinding || null;
+    native.endBinding = native.endBinding || null;
+    native.startArrowhead = native.startArrowhead || null;
+    native.endArrowhead = native.endArrowhead || "arrow";
+  } else if (el.type === "line") {
+    native.fillStyle = native.fillStyle || "solid";
+    native.strokeWidth = native.strokeWidth || 2;
+    native.strokeStyle = native.strokeStyle || "solid";
+    native.roughness = native.roughness || 1;
+    native.opacity = native.opacity || 100;
+    native.boundElements = native.boundElements || null;
+  }
+  
+  return native;
+}
+
+function createBoundTextElement(
+  id: string,
+  text: string,
+  fontSize: number,
+  containerX: number,
+  containerY: number,
+  containerWidth: number,
+  containerHeight: number,
+  containerId: string
+): any {
+  const textWidth = estimateTextWidth(text, fontSize);
+  const textHeight = estimateTextHeight(fontSize);
+  const x = containerX + (containerWidth - textWidth) / 2;
+  const y = containerY + (containerHeight - textHeight) / 2;
+
+  return {
+    type: "text",
+    version: getNextVersion(),
+    versionNonce: getNextSeed(),
+    isDeleted: false,
+    id: id,
+    fillStyle: "solid",
+    strokeWidth: 2,
+    strokeStyle: "solid",
+    roughness: 1,
+    opacity: 100,
+    angle: 0,
+    x: x,
+    y: y,
+    strokeColor: "#1e1e1e",
+    backgroundColor: "transparent",
+    width: textWidth,
+    height: textHeight,
+    seed: getNextSeed(),
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    boundElements: null,
+    updated: Date.now(),
+    link: null,
+    locked: false,
+    text: text,
+    rawText: text,
+    fontSize: fontSize,
+    fontFamily: 1,
+    textAlign: "center",
+    verticalAlign: "middle",
+    containerId: containerId,
+    originalText: text,
+    autoResize: true,
+    lineHeight: 1.25
+  };
+}
+
+function createStandaloneTextElement(
+  id: string,
+  text: string,
+  fontSize: number,
+  centerX: number,
+  centerY: number
+): any {
+  const textWidth = estimateTextWidth(text, fontSize);
+  const textHeight = estimateTextHeight(fontSize);
+
+  return {
+    type: "text",
+    version: getNextVersion(),
+    versionNonce: getNextSeed(),
+    isDeleted: false,
+    id: id,
+    fillStyle: "solid",
+    strokeWidth: 2,
+    strokeStyle: "solid",
+    roughness: 1,
+    opacity: 100,
+    angle: 0,
+    x: centerX - textWidth / 2,
+    y: centerY - textHeight / 2,
+    strokeColor: "#1e1e1e",
+    backgroundColor: "transparent",
+    width: textWidth,
+    height: textHeight,
+    seed: getNextSeed(),
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    boundElements: null,
+    updated: Date.now(),
+    link: null,
+    locked: false,
+    text: text,
+    rawText: text,
+    fontSize: fontSize,
+    fontFamily: 1,
+    textAlign: "center",
+    verticalAlign: "middle",
+    containerId: null,
+    originalText: text,
+    autoResize: true,
+    lineHeight: 1.25
+  };
+}
+
+// ============================================================
 // RECALL: shared knowledge for the agent
 // ============================================================
 const RECALL_CHEAT_SHEET = `# Excalidraw Element Format
@@ -168,224 +427,6 @@ Examples:
 
 Tip: For large diagrams, emit a cameraUpdate to focus on each section as you draw it.
 
-## Diagram Example
-
-Example prompt: "Explain how photosynthesis works"
-
-Uses 2 camera positions: start zoomed in (M) for title, then zoom out (L) to reveal the full diagram. Sun art drawn last as a finishing touch.
-
-- **Camera 1** (400x300): Draw the title "Photosynthesis" and formula subtitle zoomed in
-- **Camera 2** (800x600): Zoom out — draw the leaf zone, process flow (Light Reactions → Calvin Cycle), inputs (Sunlight, Water, CO2), outputs (O2, Glucose), and finally a cute 8-ray sun
-
-\`\`\`json
-[
-  {"type":"cameraUpdate","width":400,"height":300,"x":200,"y":-20},
-  {"type":"text","id":"ti","x":280,"y":10,"text":"Photosynthesis","fontSize":28,"strokeColor":"#1e1e1e"},
-  {"type":"text","id":"fo","x":245,"y":48,"text":"6CO2 + 6H2O --> C6H12O6 + 6O2","fontSize":16,"strokeColor":"#757575"},
-  {"type":"cameraUpdate","width":800,"height":600,"x":0,"y":-20},
-  {"type":"rectangle","id":"lf","x":150,"y":90,"width":520,"height":380,"backgroundColor":"#d3f9d8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#22c55e","strokeWidth":1,"opacity":35},
-  {"type":"text","id":"lfl","x":170,"y":96,"text":"Inside the Leaf","fontSize":16,"strokeColor":"#15803d"},
-  {"type":"rectangle","id":"lr","x":190,"y":190,"width":160,"height":70,"backgroundColor":"#fff3bf","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","label":{"text":"Light Reactions","fontSize":16}},
-  {"type":"arrow","id":"a1","x":350,"y":225,"width":120,"height":0,"points":[[0,0],[120,0]],"strokeColor":"#1e1e1e","strokeWidth":2,"endArrowhead":"arrow","label":{"text":"ATP","fontSize":14}},
-  {"type":"rectangle","id":"cc","x":470,"y":190,"width":160,"height":70,"backgroundColor":"#d0bfff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#8b5cf6","label":{"text":"Calvin Cycle","fontSize":16}},
-  {"type":"rectangle","id":"sl","x":10,"y":200,"width":120,"height":50,"backgroundColor":"#fff3bf","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","label":{"text":"Sunlight","fontSize":16}},
-  {"type":"arrow","id":"a2","x":130,"y":225,"width":60,"height":0,"points":[[0,0],[60,0]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":"arrow"},
-  {"type":"rectangle","id":"wa","x":200,"y":360,"width":140,"height":50,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","label":{"text":"Water (H2O)","fontSize":16}},
-  {"type":"arrow","id":"a3","x":270,"y":360,"width":0,"height":-100,"points":[[0,0],[0,-100]],"strokeColor":"#4a9eed","strokeWidth":2,"endArrowhead":"arrow"},
-  {"type":"rectangle","id":"co","x":480,"y":360,"width":130,"height":50,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","label":{"text":"CO2","fontSize":16}},
-  {"type":"arrow","id":"a4","x":545,"y":360,"width":0,"height":-100,"points":[[0,0],[0,-100]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":"arrow"},
-  {"type":"rectangle","id":"ox","x":540,"y":100,"width":100,"height":40,"backgroundColor":"#ffc9c9","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#ef4444","label":{"text":"O2","fontSize":16}},
-  {"type":"arrow","id":"a5","x":310,"y":190,"width":230,"height":-50,"points":[[0,0],[230,-50]],"strokeColor":"#ef4444","strokeWidth":2,"endArrowhead":"arrow"},
-  {"type":"rectangle","id":"gl","x":690,"y":195,"width":120,"height":60,"backgroundColor":"#c3fae8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#22c55e","label":{"text":"Glucose","fontSize":18}},
-  {"type":"arrow","id":"a6","x":630,"y":225,"width":60,"height":0,"points":[[0,0],[60,0]],"strokeColor":"#22c55e","strokeWidth":2,"endArrowhead":"arrow"},
-  {"type":"ellipse","id":"sun","x":30,"y":110,"width":50,"height":50,"backgroundColor":"#fff3bf","fillStyle":"solid","strokeColor":"#f59e0b","strokeWidth":2},
-  {"type":"arrow","id":"r1","x":55,"y":108,"width":0,"height":-14,"points":[[0,0],[0,-14]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r2","x":55,"y":162,"width":0,"height":14,"points":[[0,0],[0,14]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r3","x":28,"y":135,"width":-14,"height":0,"points":[[0,0],[-14,0]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r4","x":82,"y":135,"width":14,"height":0,"points":[[0,0],[14,0]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r5","x":73,"y":117,"width":10,"height":-10,"points":[[0,0],[10,-10]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r6","x":37,"y":117,"width":-10,"height":-10,"points":[[0,0],[-10,-10]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r7","x":73,"y":153,"width":10,"height":10,"points":[[0,0],[10,10]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null},
-  {"type":"arrow","id":"r8","x":37,"y":153,"width":-10,"height":10,"points":[[0,0],[-10,10]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":null,"startArrowhead":null}
-]
-\`\`\`
-
-Common mistakes to avoid:
-- **Camera size must match content with padding** — if your content is 500px tall, use 800x600 camera, not 500px. No padding = truncated edges
-- **Center titles relative to the diagram below** — estimate the diagram's total width and center the title text over it, not over the canvas
-- **Arrow labels need space** — long labels like "ATP + NADPH" overflow short arrows. Keep labels short or make arrows wider
-- **Elements overlap when y-coordinates are close** — always check that text, boxes, and labels don't stack on top of each other (e.g., an output box overlapping a zone label)
-- **Draw art/illustrations LAST** — cute decorations (sun, stars, icons) should appear as the final drawing step so they don't distract from the main content being built
-
-## Sequence flow Diagram Example
-
-Example prompt: "show a sequence diagram explaining MCP Apps"
-
-This demonstrates a UML-style sequence diagram with 4 actors (User, Agent, App iframe, MCP Server), dashed lifelines, and labeled arrows showing the full MCP Apps request/response flow. Camera pans progressively across the diagram:
-
-- **Camera 1** (600x450): Title "MCP Apps — Sequence Flow"
-- **Cameras 2–5** (400x300 each): Zoom into each actor column right-to-left — draw header box + dashed lifeline for Server, App, Agent, User. Right-to-left so the camera snakes smoothly: pan left across actors, then pan right following the first message arrows
-- **Camera 6** (400x300): Zoom into User — draw stick figure (head + body)
-- **Camera 7** (600x450): Zoom out — draw first message arrows: user prompt → agent, agent tools/call → server, tool result back, result forwarded to app iframe
-- **Camera 8** (600x450): Pan down — draw user interaction with app, app requesting tools/call back to agent
-- **Camera 9** (600x450): Pan further down — agent forwards to server, fresh data flows back through the chain, context update from app to agent
-- **Camera 10** (800x600): Final zoom-out showing the complete sequence
-
-\`\`\`json
-[
-  {"type":"cameraUpdate","width":600,"height":450,"x":80,"y":-10},
-  {"type":"text","id":"title","x":200,"y":15,"text":"MCP Apps — Sequence Flow","fontSize":24,"strokeColor":"#1e1e1e"},
-
-  {"type":"cameraUpdate","width":400,"height":300,"x":450,"y":-5},
-  {"type":"rectangle","id":"sHead","x":600,"y":60,"width":130,"height":40,"backgroundColor":"#ffd8a8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","strokeWidth":2,"label":{"text":"MCP Server","fontSize":16}},
-  {"type":"arrow","id":"sLine","x":665,"y":100,"width":0,"height":490,"points":[[0,0],[0,490]],"strokeColor":"#b0b0b0","strokeWidth":1,"strokeStyle":"dashed","endArrowhead":null},
-
-  {"type":"cameraUpdate","width":400,"height":300,"x":250,"y":-5},
-  {"type":"rectangle","id":"appHead","x":400,"y":60,"width":130,"height":40,"backgroundColor":"#b2f2bb","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#22c55e","strokeWidth":2,"label":{"text":"App iframe","fontSize":16}},
-  {"type":"arrow","id":"appLine","x":465,"y":100,"width":0,"height":490,"points":[[0,0],[0,490]],"strokeColor":"#b0b0b0","strokeWidth":1,"strokeStyle":"dashed","endArrowhead":null},
-
-  {"type":"cameraUpdate","width":400,"height":300,"x":80,"y":-5},
-  {"type":"rectangle","id":"aHead","x":230,"y":60,"width":100,"height":40,"backgroundColor":"#d0bfff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#8b5cf6","strokeWidth":2,"label":{"text":"Agent","fontSize":16}},
-  {"type":"arrow","id":"aLine","x":280,"y":100,"width":0,"height":490,"points":[[0,0],[0,490]],"strokeColor":"#b0b0b0","strokeWidth":1,"strokeStyle":"dashed","endArrowhead":null},
-
-  {"type":"cameraUpdate","width":400,"height":300,"x":-10,"y":-5},
-  {"type":"rectangle","id":"uHead","x":60,"y":60,"width":100,"height":40,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","strokeWidth":2,"label":{"text":"User","fontSize":16}},
-  {"type":"arrow","id":"uLine","x":110,"y":100,"width":0,"height":490,"points":[[0,0],[0,490]],"strokeColor":"#b0b0b0","strokeWidth":1,"strokeStyle":"dashed","endArrowhead":null},
-
-  {"type":"cameraUpdate","width":400,"height":300,"x":-40,"y":50},
-  {"type":"ellipse","id":"uh","x":58,"y":110,"width":20,"height":20,"backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed","strokeWidth":2},
-  {"type":"rectangle","id":"ub","x":57,"y":132,"width":22,"height":26,"backgroundColor":"#a5d8ff","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#4a9eed","strokeWidth":2},
-
-  {"type":"cameraUpdate","width":600,"height":450,"x":-20,"y":-30},
-  {"type":"arrow","id":"m1","x":110,"y":135,"width":170,"height":0,"points":[[0,0],[170,0]],"strokeColor":"#1e1e1e","strokeWidth":2,"endArrowhead":"arrow","label":{"text":"display a chart","fontSize":14}},
-  {"type":"rectangle","id":"note1","x":130,"y":162,"width":310,"height":26,"backgroundColor":"#fff3bf","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#f59e0b","strokeWidth":1,"opacity":50,"label":{"text":"Interactive app rendered in chat","fontSize":14}},
-
-  {"type":"cameraUpdate","width":600,"height":450,"x":170,"y":25},
-  {"type":"arrow","id":"m2","x":280,"y":210,"width":385,"height":0,"points":[[0,0],[385,0]],"strokeColor":"#8b5cf6","strokeWidth":2,"endArrowhead":"arrow","label":{"text":"tools/call","fontSize":16}},
-  {"type":"arrow","id":"m3","x":665,"y":250,"width":-385,"height":0,"points":[[0,0],[-385,0]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":"arrow","strokeStyle":"dashed","label":{"text":"tool input/result","fontSize":16}},
-  {"type":"arrow","id":"m4","x":280,"y":290,"width":185,"height":0,"points":[[0,0],[185,0]],"strokeColor":"#8b5cf6","strokeWidth":2,"endArrowhead":"arrow","strokeStyle":"dashed","label":{"text":"result → app","fontSize":16}},
-
-  {"type":"cameraUpdate","width":600,"height":450,"x":-10,"y":135},
-  {"type":"arrow","id":"m5","x":110,"y":340,"width":355,"height":0,"points":[[0,0],[355,0]],"strokeColor":"#4a9eed","strokeWidth":2,"endArrowhead":"arrow","label":{"text":"user interacts","fontSize":16}},
-  {"type":"arrow","id":"m6","x":465,"y":380,"width":-185,"height":0,"points":[[0,0],[-185,0]],"strokeColor":"#22c55e","strokeWidth":2,"endArrowhead":"arrow","label":{"text":"tools/call request","fontSize":16}},
-
-  {"type":"cameraUpdate","width":600,"height":450,"x":170,"y":235},
-  {"type":"arrow","id":"m7","x":280,"y":420,"width":385,"height":0,"points":[[0,0],[385,0]],"strokeColor":"#8b5cf6","strokeWidth":2,"endArrowhead":"arrow","label":{"text":"tools/call (forwarded)","fontSize":16}},
-  {"type":"arrow","id":"m8","x":665,"y":460,"width":-385,"height":0,"points":[[0,0],[-385,0]],"strokeColor":"#f59e0b","strokeWidth":2,"endArrowhead":"arrow","strokeStyle":"dashed","label":{"text":"fresh data","fontSize":16}},
-  {"type":"arrow","id":"m9","x":280,"y":500,"width":185,"height":0,"points":[[0,0],[185,0]],"strokeColor":"#8b5cf6","strokeWidth":2,"endArrowhead":"arrow","strokeStyle":"dashed","label":{"text":"fresh data","fontSize":16}},
-
-  {"type":"cameraUpdate","width":600,"height":450,"x":50,"y":327},
-  {"type":"rectangle","id":"note2","x":130,"y":522,"width":310,"height":26,"backgroundColor":"#d3f9d8","fillStyle":"solid","roundness":{"type":3},"strokeColor":"#22c55e","strokeWidth":1,"opacity":50,"label":{"text":"App updates with new data","fontSize":14}},
-  {"type":"arrow","id":"m10","x":465,"y":570,"width":-185,"height":0,"points":[[0,0],[-185,0]],"strokeColor":"#22c55e","strokeWidth":2,"endArrowhead":"arrow","strokeStyle":"dashed","label":{"text":"context update","fontSize":16}},
-
-  {"type":"cameraUpdate","width":800,"height":600,"x":-5,"y":2}
-]
-\`\`\`
-
-## Checkpoints (restoring previous state)
-
-Every create_view call returns a \`checkpointId\` in its response. To continue from a previous diagram state, start your elements array with a restoreCheckpoint element:
-
-\`[{"type":"restoreCheckpoint","id":"<checkpointId>"}, ...additional new elements...]\`
-
-The saved state (including any user edits made in fullscreen) is loaded from the client, and your new elements are appended on top. This saves tokens — you don't need to re-send the entire diagram.
-
-## Deleting Elements
-
-Remove elements by id using the \`delete\` pseudo-element:
-
-\`{"type":"delete","ids":"b2,a1,t3"}\`
-
-Works in two modes:
-- **With restoreCheckpoint**: restore a saved state, then surgically remove specific elements before adding new ones
-- **Inline (animation mode)**: draw elements, then delete and replace them later in the same array to create transformation effects
-
-Place delete entries AFTER the elements you want to remove. The final render filters them out.
-
-**IMPORTANT**: Every element id must be unique. Never reuse an id after deleting it — always assign a new id to replacement elements.
-
-## Animation Mode — Transform in Place
-
-Instead of building left-to-right and panning away, you can animate by DELETING elements and replacing them at the same position. Combined with slight camera moves, this creates smooth visual transformations during streaming.
-
-Pattern:
-1. Draw initial elements
-2. cameraUpdate (shift/zoom slightly)
-3. \`{"type":"delete","ids":"old1,old2"}\`
-4. Draw replacements at same coordinates (different color/content)
-5. Repeat
-
-Example prompt: "Pixel snake eats apple"
-
-Snake moves right by adding a head segment and deleting the tail. On eating the apple, tail is NOT deleted (snake grows). Camera nudges between frames add subtle motion.
-
-\`\`\`json
-[
-  {"type":"cameraUpdate","width":400,"height":300,"x":0,"y":0},
-  {"type":"ellipse","id":"ap","x":260,"y":78,"width":20,"height":20,"backgroundColor":"#ef4444","fillStyle":"solid","strokeColor":"#ef4444"},
-  {"type":"rectangle","id":"s0","x":60,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"rectangle","id":"s1","x":88,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"rectangle","id":"s2","x":116,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"rectangle","id":"s3","x":144,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"cameraUpdate","width":400,"height":300,"x":1,"y":0},
-  {"type":"rectangle","id":"s4","x":172,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"s0"},
-  {"type":"cameraUpdate","width":400,"height":300,"x":0,"y":1},
-  {"type":"rectangle","id":"s5","x":200,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"s1"},
-  {"type":"cameraUpdate","width":400,"height":300,"x":1,"y":0},
-  {"type":"rectangle","id":"s6","x":228,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"s2"},
-  {"type":"cameraUpdate","width":400,"height":300,"x":0,"y":0},
-  {"type":"rectangle","id":"s7","x":256,"y":130,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"s3"},
-  {"type":"cameraUpdate","width":400,"height":300,"x":1,"y":1},
-  {"type":"rectangle","id":"s8","x":256,"y":102,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"s4"},
-  {"type":"cameraUpdate","width":400,"height":300,"x":0,"y":0},
-  {"type":"rectangle","id":"s9","x":256,"y":74,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"ap"},
-  {"type":"cameraUpdate","width":400,"height":300,"x":1,"y":0},
-  {"type":"rectangle","id":"s10","x":256,"y":46,"width":28,"height":28,"backgroundColor":"#22c55e","fillStyle":"solid","strokeColor":"#15803d","strokeWidth":1},
-  {"type":"delete","ids":"s5"}
-]
-\`\`\`
-
-Key techniques:
-- Add head + delete tail each frame = snake movement illusion
-- On eat: delete apple instead of tail = snake grows by one
-- Post-eat frame resumes normal add-head/delete-tail, proving the snake is now longer
-- Camera nudges (0,0 → 1,0 → 0,1 → ...) add subtle motion between frames
-- Always use NEW ids for added segments (s0→s4→s5→...); never reuse deleted ids
-
-## Dark Mode
-
-If the user asks for a dark theme/mode diagram, use a massive dark background rectangle as the FIRST element (before cameraUpdate). Make it 10x the camera size so it covers the entire viewport even when panning:
-
-\`{"type":"rectangle","id":"darkbg","x":-4000,"y":-3000,"width":10000,"height":7500,"backgroundColor":"#1e1e2e","fillStyle":"solid","strokeColor":"transparent","strokeWidth":0}\`
-
-Then use these colors on the dark background:
-
-**Text colors (on dark):**
-| Color | Hex | Use |
-|-------|-----|-----|
-| White | \`#e5e5e5\` | Primary text, titles |
-| Muted | \`#a0a0a0\` | Secondary text, annotations |
-| NEVER | \`#555\` or darker | Invisible on dark bg! |
-
-**Shape fills (on dark):**
-| Color | Hex | Good For |
-|-------|-----|----------|
-| Dark Blue | \`#1e3a5f\` | Primary nodes |
-| Dark Green | \`#1a4d2e\` | Success, output |
-| Dark Purple | \`#2d1b69\` | Processing, special |
-| Dark Orange | \`#5c3d1a\` | Warning, pending |
-| Dark Red | \`#5c1a1a\` | Error, critical |
-| Dark Teal | \`#1a4d4d\` | Storage, data |
-
-**Stroke/arrow colors (on dark):**
-Use the Primary Colors from above — they're bright enough on dark backgrounds. For shape borders, use slightly lighter variants or \`#555555\` for subtle outlines.
-
 ## Tips
 - Do NOT call read_me again — you already have everything you need
 - Use the color palette consistently
@@ -527,8 +568,25 @@ However, if the user wants to edit something on this diagram "${checkpointId}", 
         };
       }
       try {
+        // Parse and convert MCP format to native Excalidraw format
+        const parsed = JSON.parse(json);
+        const nativeElements = convertMcpToNative({ elements: parsed.elements || parsed });
+        
+        // Create proper Excalidraw JSON structure
+        const excalidrawJson = JSON.stringify({
+          type: "excalidraw",
+          version: 2,
+          source: "excalidraw-mcp",
+          elements: nativeElements,
+          appState: {
+            viewBackgroundColor: "#ffffff",
+            gridSize: null
+          },
+          files: {}
+        });
+
         // --- Excalidraw v2 binary format ---
-        const remappedJson = json;
+        const remappedJson = excalidrawJson;
         // concatBuffers: [version=1 (4B)] [len₁ (4B)] [data₁] [len₂ (4B)] [data₂] ...
         const concatBuffers = (...bufs: Uint8Array[]): Uint8Array => {
           let total = 4; // version header
@@ -601,7 +659,52 @@ However, if the user wants to edit something on this diagram "${checkpointId}", 
   );
 
   // ============================================================
-  // Tool 4: save_checkpoint (private — widget only, for user edits)
+  // Tool 4: export_to_png (export diagram as PNG base64)
+  // ============================================================
+  registerAppTool(server,
+    "export_to_png",
+    {
+      description: "Export diagram as PNG image (base64 encoded). Converts MCP format to native Excalidraw format before export.",
+      inputSchema: z.object({
+        json: z.string().describe("Serialized Excalidraw JSON"),
+        scale: z.number().optional().default(2).describe("Export scale (1, 2, or 3)")
+      }),
+      _meta: { ui: { visibility: ["app", "model"] } },
+    },
+    async ({ json, scale = 2 }): Promise<CallToolResult> => {
+      if (json.length > MAX_INPUT_BYTES) {
+        return {
+          content: [{ type: "text", text: `Export data exceeds ${MAX_INPUT_BYTES} byte limit.` }],
+          isError: true,
+        };
+      }
+      try {
+        // Parse and convert MCP format to native Excalidraw format
+        const parsed = JSON.parse(json);
+        const nativeElements = convertMcpToNative({ elements: parsed.elements || parsed });
+        
+        // Return the converted elements for client-side PNG export
+        // The client will use exportToSvg and canvas to generate PNG
+        return { 
+          content: [{ 
+            type: "text", 
+            text: JSON.stringify({
+              elements: nativeElements,
+              scale: scale
+            })
+          }] 
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Export failed: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ============================================================
+  // Tool 5: save_checkpoint (private — widget only, for user edits)
   // ============================================================
   registerAppTool(server,
     "save_checkpoint",
@@ -627,7 +730,7 @@ However, if the user wants to edit something on this diagram "${checkpointId}", 
   );
 
   // ============================================================
-  // Tool 5: read_checkpoint (private — widget only)
+  // Tool 6: read_checkpoint (private — widget only)
   // ============================================================
   registerAppTool(server,
     "read_checkpoint",
