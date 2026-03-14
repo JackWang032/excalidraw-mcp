@@ -39,6 +39,33 @@ function estimateTextHeight(fontSize: number): number {
   return Math.ceil(fontSize * 1.25);
 }
 
+function wrapText(text: string, maxWidth: number, fontSize: number): { wrappedText: string; lines: number } {
+  const charWidth = fontSize * 0.55;
+  const maxChars = Math.floor(maxWidth / charWidth);
+  
+  if (text.length <= maxChars) {
+    return { wrappedText: text, lines: 1 };
+  }
+  
+  const words = text.split('');
+  const lines: string[] = [];
+  let currentLine = '';
+  
+  for (const char of words) {
+    if (currentLine.length < maxChars) {
+      currentLine += char;
+    } else {
+      lines.push(currentLine);
+      currentLine = char;
+    }
+  }
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  
+  return { wrappedText: lines.join('\n'), lines: lines.length };
+}
+
 /**
  * Convert MCP simplified format to native Excalidraw format.
  * - Transforms `label` property on shapes/arrows to bound text elements
@@ -134,7 +161,7 @@ function convertElementToNative(el: any): any {
     native.boundElements = native.boundElements || null;
     native.rawText = native.rawText || native.text;
     native.originalText = native.originalText || native.text;
-    native.fontFamily = native.fontFamily || 1;
+    native.fontFamily = native.fontFamily || 2;
     native.textAlign = native.textAlign || "left";
     native.verticalAlign = native.verticalAlign || "top";
     native.containerId = native.containerId || null;
@@ -182,9 +209,12 @@ function createBoundTextElement(
   containerHeight: number,
   containerId: string
 ): any {
-  const textWidth = estimateTextWidth(text, fontSize);
-  const textHeight = estimateTextHeight(fontSize);
-  const x = containerX + (containerWidth - textWidth) / 2;
+  const padding = 10;
+  const maxTextWidth = containerWidth - padding * 2;
+  const { wrappedText, lines } = wrapText(text, maxTextWidth, fontSize);
+  
+  const textHeight = Math.ceil(fontSize * 1.25 * lines);
+  const x = containerX + padding;
   const y = containerY + (containerHeight - textHeight) / 2;
 
   return {
@@ -203,7 +233,7 @@ function createBoundTextElement(
     y: y,
     strokeColor: "#1e1e1e",
     backgroundColor: "transparent",
-    width: textWidth,
+    width: maxTextWidth,
     height: textHeight,
     seed: getNextSeed(),
     groupIds: [],
@@ -213,15 +243,15 @@ function createBoundTextElement(
     updated: Date.now(),
     link: null,
     locked: false,
-    text: text,
-    rawText: text,
+    text: wrappedText,
+    rawText: wrappedText,
     fontSize: fontSize,
-    fontFamily: 1,
+    fontFamily: 2,
     textAlign: "center",
     verticalAlign: "middle",
     containerId: containerId,
-    originalText: text,
-    autoResize: true,
+    originalText: wrappedText,
+    autoResize: false,
     lineHeight: 1.25
   };
 }
@@ -265,7 +295,7 @@ function createStandaloneTextElement(
     text: text,
     rawText: text,
     fontSize: fontSize,
-    fontFamily: 1,
+    fontFamily: 2,
     textAlign: "center",
     verticalAlign: "middle",
     containerId: null,
