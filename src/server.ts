@@ -47,23 +47,49 @@ function wrapText(text: string, maxWidth: number, fontSize: number): { wrappedTe
     return { wrappedText: text, lines: 1 };
   }
   
-  const words = text.split('');
-  const lines: string[] = [];
-  let currentLine = '';
+  // Check if text contains Chinese/Japanese/Korean characters
+  const hasCJK = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(text);
   
-  for (const char of words) {
-    if (currentLine.length < maxChars) {
-      currentLine += char;
-    } else {
-      lines.push(currentLine);
-      currentLine = char;
+  if (hasCJK) {
+    // For CJK text, break by characters
+    const lines: string[] = [];
+    let currentLine = '';
+    
+    for (const char of text) {
+      if (currentLine.length < maxChars) {
+        currentLine += char;
+      } else {
+        lines.push(currentLine);
+        currentLine = char;
+      }
     }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+    
+    return { wrappedText: lines.join('\n'), lines: lines.length };
+  } else {
+    // For English text, break by words
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let currentLine = '';
+    
+    for (const word of words) {
+      if (currentLine.length === 0) {
+        currentLine = word;
+      } else if (currentLine.length + 1 + word.length <= maxChars) {
+        currentLine += ' ' + word;
+      } else {
+        lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+    
+    return { wrappedText: lines.join('\n'), lines: lines.length };
   }
-  if (currentLine) {
-    lines.push(currentLine);
-  }
-  
-  return { wrappedText: lines.join('\n'), lines: lines.length };
 }
 
 /**
